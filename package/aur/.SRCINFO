@@ -9,7 +9,7 @@ pkgbase = netpair
 	depends = passt
 	makedepends = go
 	optdepends = iproute2
-	source = netpair::git+https://github.com/nickcis/netpair.git#tag=v0.1.0
+	source = netpair::git+https://github.com/NickCis/netpair.git#tag=v0.1.0
 	sha256sums = SKIP
 
 pkgname = netpair

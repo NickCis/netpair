@@ -4,30 +4,30 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Run process pairs in isolated network namespaces with port relay and SSH forwarding"
 arch=('x86_64' 'aarch64')
-url="https://github.com/nickcis/netpair"
+url="https://github.com/NickCis/netpair"
 license=('MIT')
 depends=('passt')
 makedepends=('go')
 optdepends=(
   'iproute2: port auto-discovery in netpair connect'
 )
-source=("$url.git#tag=v$pkgver")
+source=("${pkgname}::git+${url}.git#tag=v${pkgver}")
 sha256sums=('SKIP')
 
 build() {
-  cd "$pkgname"
+  cd "${pkgname}"
   export CGO_ENABLED=0
   go build -trimpath -ldflags="-s -w" -o netpair ./cmd/netpair
   go build -trimpath -ldflags="-s -w" -o netpair-manager ./cmd/netpair-manager
 }
 
 check() {
-  cd "$pkgname"
+  cd "${pkgname}"
   go test ./...
 }
 
 package() {
-  cd "$pkgname"
+  cd "${pkgname}"
   install -Dm755 netpair "$pkgdir/usr/bin/netpair"
   install -Dm755 netpair-manager "$pkgdir/usr/bin/netpair-manager"
   install -Dm644 README.md "$pkgdir/usr/share/doc/netpair/README.md"
