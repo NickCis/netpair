@@ -1,0 +1,15 @@
+pkgbase = netpair
+	pkgdesc = Run process pairs in isolated network namespaces with port relay and SSH forwarding
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/nickcis/netpair
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	depends = passt
+	makedepends = go
+	optdepends = iproute2
+	source = netpair::git+https://github.com/nickcis/netpair.git#tag=v0.1.0
+	sha256sums = SKIP
+
+pkgname = netpair

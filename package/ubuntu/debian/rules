@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+
+export GO111MODULE=on
+export CGO_ENABLED=0
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	go build -trimpath -ldflags="-s -w" -o netpair ./cmd/netpair
+	go build -trimpath -ldflags="-s -w" -o netpair-manager ./cmd/netpair-manager
+
+override_dh_auto_test:
+	go test ./...
+
+override_dh_auto_install:
+	install -D -m 755 netpair debian/netpair/usr/bin/netpair
+	install -D -m 755 netpair-manager debian/netpair/usr/bin/netpair-manager
+	install -D -m 644 README.md debian/netpair/usr/share/doc/netpair/README.md
+
+override_dh_dwz:
+	:
