@@ -1,0 +1,85 @@
+netpair (0.1.5-1) unstable; urgency=medium
+
+  * netpair ps: add a header row and a HOST-PID column. Processes run in the
+    pair's own PID namespace, so the PIDs shown by ps (now NS-PID) never
+    existed on the host; HOST-PID is resolved from /proc via NSpid so it can
+    be used with regular host tools (kill, strace, ...). Rows are sorted by
+    PID, and already-exited processes show "-".
+  * netpair kill: add --signal (name such as TERM, or a number) to send
+    signals other than SIGKILL, e.g. for a graceful stop. Signalling an
+    already-exited process is reported instead of claiming success.
+  * netpair create/status: report the manager's host PID in CLI output and
+    in the state file (manager_host_pid), instead of only its in-pair PID.
+
+ -- Nicolas Cisco <nicolas@nckweb.com.ar>  Tue, 20 Oct 2026 13:30:00 +0000
+
+netpair (0.1.4-1) unstable; urgency=medium
+
+  * Add a wire-protocol handshake: the manager reports its protocol version
+    in "status". Upgrading the package does not restart the managers of
+    already-running pairs, so an old manager could not serve attached
+    "netpair run" (or connect auto-discovery) and failed with the cryptic
+    "unknown op: wait". "netpair run" and "netpair connect" now detect this
+    and say to recreate the pair, and "netpair doctor" lists existing pairs
+    with their manager protocol version and warns on mismatches.
+
+ -- Nicolas Cisco <nicolas@nckweb.com.ar>  Tue, 20 Oct 2026 13:35:00 +0000
+
+netpair (0.1.3-1) unstable; urgency=medium
+
+  * netpair run is now blocking by default: it forwards stdin, merges the
+    process's stdout/stderr (in order) onto the terminal, and exits with the
+    process's exit code. Ctrl-C terminates the process; a second signal
+    exits the client immediately. Add --daemon for the previous detached
+    behaviour (output keeps going to <pair>.log, managed by ps/kill).
+  * Manager protocol: 'exec' now streams stdio over the pair socket (JSON
+    ack, then raw bytes, half-close on stdin EOF); new 'wait' op returns
+    the exit code once the process is reaped. The old one-shot 'exec' used
+    to buffer all output in the response and was unused.
+  * 'ps' exit-code reporting is now race-free.
+
+ -- Nicolas Cisco <nicolas@nckweb.com.ar>  Tue, 20 Oct 2026 13:20:00 +0000
+
+netpair (0.1.2-1) unstable; urgency=medium
+
+  * pasta AppArmor profile: add the required 'userns,' rule. Since the
+    profile is loaded, it decides by itself whether pasta may create a user
+    namespace — the restriction sysctls only gate unconfined programs. The
+    0.1.1 profile therefore broke pasta on machines where it got loaded
+    ("Couldn't create user namespace: Permission denied") even with
+    apparmor_restrict_unprivileged_userns=0.
+  * netpair doctor: warn when the installed pasta profile lacks the userns
+    rule, and explain the stale-profile failure mode in the remedy hint.
+  * netpair create: also recognise "Couldn't create user namespace" as a
+    userns denial so the remedy hint is printed.
+  * Add --verbose/-v (and NETPAIR_VERBOSE=1): stream the pair log to stderr
+    while create waits for pasta/manager, and mention the pair log in docs.
+  * netpair list: report pairs whose state cannot be loaded instead of
+    silently skipping them.
+
+ -- Nicolas Cisco <nicolas@nckweb.com.ar>  Tue, 20 Oct 2026 13:05:00 +0000
+
+netpair (0.1.1-1) unstable; urgency=medium
+
+  * Ship a pasta AppArmor profile (usr.bin.pasta). Ubuntu 24.04 restricts
+    unprivileged user namespaces (apparmor_restrict_unprivileged_userns=1)
+    and pasta can only create its namespace while running under a profile.
+    The profile is loaded on install and at boot.
+  * netpair create: detect pasta exiting early (zombie-aware liveness) and
+    surface pasta's own error output from the per-pair pasta log.
+  * netpair create: disable pasta's default 'auto' port forwarding in all
+    directions (-t/-u/-T/-U none) so pairs stay isolated until the
+    respective 'netpair connect'.
+  * Fix DNS inside pairs: pasta inherits the host resolv.conf, whose
+    127.0.0.53 systemd-resolved stub is unusable inside the namespace; the
+    manager now bind-mounts a corrected copy (private to the namespace).
+  * Add 'netpair doctor' for environment diagnostics (pasta, apparmor
+    restriction, upstream DNS, live namespace probes).
+
+ -- Nicolas Cisco <nicolas@nckweb.com.ar>  Mon, 20 Oct 2026 12:35:00 +0000
+
+netpair (0.1.0-1) unstable; urgency=medium
+
+  * Initial release.
+
+ -- Nicolas Cisco <nicolas@nckweb.com.ar>  Mon, 19 Oct 2026 14:50:00 +0000

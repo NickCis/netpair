@@ -30,6 +30,10 @@ func Run(name string, maps []PortMap) error {
 	}
 
 	if len(maps) == 0 {
+		// Auto-discovery runs ss through the streaming exec protocol.
+		if err := protocol.CheckVersion(name, st.SocketPath); err != nil {
+			return err
+		}
 		maps, err = discoverPorts(st.SocketPath)
 		if err != nil {
 			return err
@@ -150,17 +154,33 @@ func relay(socketPath string, nsPort int, client net.Conn) {
 }
 
 func discoverPorts(socketPath string) ([]PortMap, error) {
-	resp, err := protocol.Call(socketPath, protocol.Request{
-		Op:  "exec",
+	conn, br, resp, err := protocol.Dial(socketPath, protocol.Request{
+		Op:   "exec",
 		Argv: []string{"ss", "-tlnH"},
 	})
 	if err != nil {
 		return nil, err
 	}
+	defer conn.Close()
 	if !resp.OK {
 		return nil, fmt.Errorf("ss failed: %s", resp.Error)
 	}
-	return parseSSOutput(resp.Output), nil
+	// ss does not read stdin, but close that direction anyway so the
+	// manager's stdin forwarding does not linger.
+	if uw, ok := conn.(*net.UnixConn); ok {
+		_ = uw.CloseWrite()
+	}
+
+	out, err := io.ReadAll(br)
+	if err != nil {
+		return nil, fmt.Errorf("read ss output: %w", err)
+	}
+	// The stream ends after the manager reaped ss; verify it succeeded
+	// (diagnostics land on stderr, merged into out).
+	if wr, err := protocol.Call(socketPath, protocol.Request{Op: "wait", ID: resp.ID}); err == nil && wr.OK && wr.ExitCode != 0 {
+		return nil, fmt.Errorf("ss failed (exit %d): %s", wr.ExitCode, strings.TrimSpace(string(out)))
+	}
+	return parseSSOutput(string(out)), nil
 }
 
 func parseSSOutput(output string) []PortMap {

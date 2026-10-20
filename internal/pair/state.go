@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -11,12 +12,13 @@ import (
 )
 
 type State struct {
-	Name       string    `json:"name"`
-	PastaPID   int       `json:"pasta_pid"`
-	ManagerPID int       `json:"manager_pid"`
-	Hostname   string    `json:"hostname,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	SocketPath string    `json:"socket_path"`
+	Name           string    `json:"name"`
+	PastaPID       int       `json:"pasta_pid"`
+	ManagerPID     int       `json:"manager_pid"`                // inside the pair's PID namespace
+	ManagerHostPID int       `json:"manager_host_pid,omitempty"` // on the host, when resolvable
+	Hostname       string    `json:"hostname,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	SocketPath     string    `json:"socket_path"`
 }
 
 func Load(name string) (*State, error) {
@@ -87,6 +89,30 @@ func Alive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	err := syscall.Kill(pid, 0)
-	return err == nil
+	if err := syscall.Kill(pid, 0); err != nil {
+		return false
+	}
+	// A child that exited but was not reaped yet still exists as a zombie,
+	// and kill(pid, 0) answers yes for zombies. Read /proc/<pid>/stat to
+	// tell them apart so callers fail fast instead of waiting for a
+	// process that is already gone.
+	state, ok := procState(pid)
+	if !ok {
+		return false
+	}
+	return state != 'Z' && state != 'X'
+}
+
+func procState(pid int) (byte, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, false
+	}
+	// comm (field 2) may contain spaces and parentheses; the process state
+	// (field 3) always follows the closing parenthesis of comm.
+	cp := strings.LastIndexByte(string(data), ')')
+	if cp < 0 || cp+2 >= len(data) {
+		return 0, false
+	}
+	return data[cp+2], true
 }

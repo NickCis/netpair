@@ -1,0 +1,20 @@
+Package: netpair
+Version: 0.1.5-1
+Architecture: amd64
+Maintainer: Nicolas Cisco <nicolas@nckweb.com.ar>
+Installed-Size: 7868
+Depends: passt, iproute2
+Section: net
+Priority: optional
+Homepage: https://github.com/nickcis/netpair
+Description: isolated network namespace pairs for processes
+ netpair runs process pairs in isolated network namespaces with Internet
+ access, local port relay, and native SSH port forwarding.
+ .
+ Each pair uses pasta from the passt package for networking. iproute2
+ provides ss(8) used by netpair connect for automatic port discovery.
+ .
+ On Ubuntu 24.04 there is an AppArmor profile for pasta
+ (/etc/apparmor.d/usr.bin.pasta); pasta requires it when unprivileged
+ user namespaces are restricted (the default there). Run 'netpair doctor'
+ to verify the environment.

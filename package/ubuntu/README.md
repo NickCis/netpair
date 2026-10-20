@@ -6,13 +6,13 @@
 |------|---------|---------|
 | Runtime | `passt` | Provides `pasta` for isolated network namespaces |
 | Runtime | `iproute2` | Provides `ss` for `netpair connect` auto-discovery |
-| Build | `golang-go` (>= 1.22) | Compile netpair and netpair-manager |
+| Build | `golang-1.26-go` (>= 1.26) | Compile netpair and netpair-manager |
 | Build | `debhelper` | Debian packaging helpers |
 
 Install build tools on Ubuntu:
 
 ```bash
-sudo apt install devscripts debhelper golang-go passt iproute2
+sudo apt install devscripts debhelper golang-1.26-go passt iproute2
 ```
 
 ## Build a .deb
@@ -31,13 +31,13 @@ The binary packages appear in the parent directory (`../netpair_*.deb`).
 ## Install
 
 ```bash
-sudo apt install ../netpair_0.1.0-1_*.deb
+sudo apt install ../netpair_0.1.5-1_*.deb
 ```
 
 Or after building:
 
 ```bash
-sudo dpkg -i ../netpair_0.1.0-1_*.deb
+sudo dpkg -i ../netpair_0.1.5-1_*.deb
 sudo apt-get install -f
 ```
 
@@ -45,9 +45,17 @@ sudo apt-get install -f
 
 - `/usr/bin/netpair`
 - `/usr/bin/netpair-manager`
+- `/etc/apparmor.d/usr.bin.pasta` — pasta AppArmor profile (conffile)
 - `/usr/share/doc/netpair/README.md`
 
 ## Notes
 
 - Both binaries must be on `PATH`; the Debian package installs both to `/usr/bin`.
-- Unprivileged user namespaces must be enabled on the host.
+- Unprivileged user namespaces must be enabled on the host. On **Ubuntu 24.04+**
+  they are restricted by AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`);
+  pasta needs the shipped AppArmor profile to start a pair namespace. The profile
+  is loaded automatically on package install (and at boot via `apparmor.service`).
+  It must grant `userns,`: once a pasta profile is loaded it decides on its own
+  whether pasta may create user namespaces, regardless of the sysctl. Upgrade
+  from netpair 0.1.1 (whose profile lacked that rule) reloads the fixed profile.
+  Verify the environment after installation with `netpair doctor`.

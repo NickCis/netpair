@@ -3,7 +3,7 @@ Section: net
 Priority: optional
 Maintainer: Nicolas Cisco <nicolas@nckweb.com.ar>
 Build-Depends: debhelper-compat (= 13),
-               golang-go (>= 2:1.22~)
+               golang-1.26-go (>= 1.26~)
 Standards-Version: 4.6.2
 Homepage: https://github.com/nickcis/netpair
 Rules-Requires-Root: no
@@ -21,3 +21,8 @@ Description: isolated network namespace pairs for processes
  .
  Each pair uses pasta from the passt package for networking. iproute2
  provides ss(8) used by netpair connect for automatic port discovery.
+ .
+ On Ubuntu 24.04 there is an AppArmor profile for pasta
+ (/etc/apparmor.d/usr.bin.pasta); pasta requires it when unprivileged
+ user namespaces are restricted (the default there). Run 'netpair doctor'
+ to verify the environment.

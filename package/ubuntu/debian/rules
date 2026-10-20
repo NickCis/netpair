@@ -2,6 +2,7 @@
 
 export GO111MODULE=on
 export CGO_ENABLED=0
+export PATH := /usr/lib/go-1.26/bin:$(PATH)
 
 %:
 	dh $@
@@ -17,6 +18,7 @@ override_dh_auto_install:
 	install -D -m 755 netpair debian/netpair/usr/bin/netpair
 	install -D -m 755 netpair-manager debian/netpair/usr/bin/netpair-manager
 	install -D -m 644 README.md debian/netpair/usr/share/doc/netpair/README.md
+	install -D -m 644 package/ubuntu/apparmor/usr.bin.pasta debian/netpair/etc/apparmor.d/usr.bin.pasta
 
 override_dh_dwz:
 	:

@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# usr.bin.pasta - AppArmor profile for pasta(1), as used by netpair.
+#
+# Base profile from upstream passt (contrib/apparmor/usr.bin.pasta), with
+# netpair-specific rules appended at the bottom:
+#
+#   1. write access to netpair's runtime dir under /run/user/<uid>/netpair:
+#      pasta writes its log file there (netpair create uses --log-file);
+#   2. execution of netpair-manager: pasta execs it as the namespace
+#      command. Upstream only whitelists execs under /bin and /usr/bin.
+#
+# NOTE: the netpair-manager exec rules deliberately avoid paths that
+# overlap abstractions/base's "owner @{HOMEDIRS}/.Private/**" rule: mixing
+# X rules whose path regexes overlap there makes the parser fail with
+# "profile has merged rule with conflicting x modifiers". A netpair-manager
+# binary placed deeper inside a home directory (e.g. ~/repo/netpair)
+# therefore needs to be installed to /usr/bin (or run through one of the
+# allowed locations below). Check with 'netpair doctor'.
+#
+# This profile is REQUIRED on systems that restrict unprivileged user
+# namespaces (Ubuntu 24.04+: kernel.apparmor_restrict_unprivileged_userns=1),
+# because pasta must create a user namespace to work. Reload with:
+#   sudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta
+#
+# Status can be checked with: netpair doctor
+
+abi <abi/4.0>,
+
+include <tunables/global>
+
+profile pasta /usr/bin/pasta{,.avx2} flags=(attach_disconnected) {
+  include <abstractions/pasta>
+
+  # Allow creating user namespaces. On kernels that enforce AppArmor's
+  # userns restriction (Ubuntu 24.04: kernel.apparmor_restrict_
+  # unprivileged_userns=1) a confined program needs this explicit rule;
+  # the sysctls only gate *unconfined* ones. Without it pasta fails with
+  # "Couldn't create user namespace: Permission denied" — even when the
+  # sysctls are set to 0 (or after switching them off), because the
+  # profile itself then decides.
+  userns,
+
+  include <abstractions/user-tmp>		# tap_sock_unix_open(),
+						# tap_sock_unix_init(), pcap(),
+						# pidfile_open(),
+						# pidfile_write(),
+						# logfile_init()
+
+  # user-tmp is using "owner" which is not compatible with netns paths
+  # as they show up with ouid=0 in the kernel AppArmor checks
+  /tmp/**				rw,	# pasta_open_ns()
+
+  owner @{HOME}/**			w,	# pcap(), pidfile_open(),
+						# pidfile_write()
+
+  # --- netpair additions -------------------------------------------------
+
+  # netpair's per-pair runtime files (log, state, socket, resolv.conf)
+  owner @{run}/user/@{uid}/netpair/	r,
+  owner @{run}/user/@{uid}/netpair/**	rw,
+
+  # netpair-manager is execed by pasta as the namespace command; let it
+  # escape the pasta confinement. /usr/bin covers package installs, the
+  # other prefixes cover common build locations (--prefix, make install,
+  # temporary builds).
+  /usr/bin/netpair-manager		Ux,
+  /tmp/**/netpair-manager		Ux,
+  /opt/**/netpair-manager		Ux,
+  /usr/local/**/netpair-manager		Ux,
+  /var/**/netpair-manager		Ux,
+  /mnt/**/netpair-manager		Ux,
+  /srv/**/netpair-manager		Ux,
+  /run/**/netpair-manager		Ux,
+  /home/*/netpair-manager		Ux,
+  /root/[^.]*/netpair-manager		Ux,
+}

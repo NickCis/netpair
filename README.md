@@ -6,10 +6,13 @@ Each **pair** gets its own network stack via [pasta](https://passt.top/) (from t
 
 ## Requirements
 
-- Linux with unprivileged user namespaces enabled
+- Linux with unprivileged user namespaces enabled (see
+  [Ubuntu 24.04 note](#ubuntu-2404-unprivileged-user-namespaces--apparmor))
 - [passt](https://passt.top/) — provides `pasta` (`apt install passt`)
 - [iproute2](https://wiki.linuxfoundation.org/networking/iproute2) — provides `ss` for automatic port discovery in `connect`
 - Go 1.26+ (to build from source)
+
+If something does not start as expected, run `netpair doctor` first.
 
 ## Build from source
 
@@ -68,11 +71,9 @@ sudo add-apt-repository universe
 sudo apt update
 ```
 
-**Go version:** `go.mod` requires Go 1.26. The `golang-go` meta package on Noble still points to Go 1.22, which is too old. Install `golang-1.26-go` and put it on `PATH` before building:
+**Go version:** `go.mod` requires Go 1.26. Do not install `golang-go` alone — it points to Go 1.22 on Noble. Install `golang-1.26-go`; `debian/rules` adds `/usr/lib/go-1.26/bin` to `PATH` automatically.
 
 ```bash
-export PATH=/usr/lib/go-1.26/bin:$PATH
-/usr/lib/go-1.26/bin/go version   # should show go1.26.x
 ./package/ubuntu/build-deb.sh
 ```
 
@@ -120,8 +121,9 @@ The PKGBUILD clones tag `v0.1.0` into `src/netpair`. See [`package/aur/README.md
 # Create an isolated pair
 netpair create alpha
 
-# Run any process inside the namespace
-netpair run alpha -- python3 -m http.server 8080
+# Run a process inside the namespace (blocking, stdio attached) or in the
+# background (--daemon, output to the pair log)
+netpair run alpha --daemon -- python3 -m http.server 8080
 
 # Expose namespace ports on the host (blocking)
 netpair connect alpha --port 8080
@@ -136,6 +138,32 @@ netpair destroy alpha
 
 Everything after `--` is passed directly to `exec` — no shell, no special-casing.
 
+### Running processes
+
+By default `netpair run` is blocking and attached: stdin is forwarded to the process, its stdout and stderr are merged (in order) onto the caller's output, and the command exits with the process's exit code. Ctrl-C terminates the process (a second Ctrl-C exits immediately).
+
+There is no TTY inside the pair, so full-screen interactive programs are not supported.
+
+With `--daemon` the process is started in the background instead: `netpair run` prints its id/pid, its output goes to the pair log, and it can be managed with `netpair ps` / `netpair kill`.
+
+```bash
+netpair run alpha -- watch -n1 date        # blocks, Ctrl-C to stop
+netpair run alpha --daemon -- python3 -m http.server 8080
+tail -f "$XDG_RUNTIME_DIR/netpair/alpha.log"
+```
+
+`netpair ps` lists managed processes with a header row:
+
+```
+ID      NS-PID  HOST-PID  STATUS      COMMAND
+proc-1  9       162870    running     python3 -m http.server 8080
+proc-2  10      -         exited(42)  /bin/sh -c ...
+```
+
+A pair has its own PID namespace, so `NS-PID` only exists inside the pair; `HOST-PID` is the real process on the host (use it with regular host tools such as `kill`, `strace` or `cat /proc/<pid>/...`). It shows `-` for processes that already exited or that cannot be resolved.
+
+`netpair kill <name> --id proc-N` signals a managed process through the manager (default `SIGKILL`); add `--signal TERM` (a name or a number) for a graceful stop. Because `netpair ps` reports host PIDs, you can also signal a running process directly from the host with `kill <HOST-PID>`.
+
 ## Commands
 
 | Command | Description |
@@ -144,14 +172,21 @@ Everything after `--` is passed directly to `exec` — no shell, no special-casi
 | `destroy <name>` | Tear down a pair |
 | `list` | List pairs |
 | `status <name>` | Show pair state (JSON) |
-| `run <name> -- <argv...>` | Run any process inside the pair |
-| `kill <name> --id <id>` | Kill a tracked process |
-| `ps <name>` | List managed processes |
+| `doctor` | Check the environment (pasta, user namespaces, DNS, ...) |
+| `run <name> -- <argv...>` | Run a process with stdio attached (blocking, exits with its code) |
+| `run <name> --daemon -- <argv...>` | Start a detached process (output goes to the pair log) |
+| `kill <name> --id <id> [--signal SIG]` | Signal a managed process (default SIGKILL) |
+| `ps <name>` | List managed processes (in-pair and host PIDs) |
 | `connect <name>` | Auto-discover listening ports and forward to host |
 | `connect <name> --port 8080` | Forward ns:8080 → host:8080 |
 | `connect <name> --port 8080:19080` | Forward ns:8080 → host:19080 |
 | `ssh-tunnel <name> --remote user@host ...` | SSH `-R` (reverse forward) |
 | `ssh-remote --remote user@host ...` | SSH `-L` (local forward), optional `-- <argv...>` |
+
+Options:
+
+- `--verbose` / `-v` (or `NETPAIR_VERBOSE=1`): stream the pair's log file to stderr while `create` waits for pasta and the manager to come up, so startup errors and warnings are visible in the terminal instead of only in `<name>.log`. Only accepted before a `--` separator.
+- `--daemon` (`run` only): detach instead of running attached; see [Running processes](#running-processes).
 
 ## SSH tunneling
 
@@ -197,7 +232,24 @@ Processes inside a pair inherit the environment of the terminal that ran `netpai
 
 ## State
 
-Pair metadata lives under `$XDG_RUNTIME_DIR/netpair/` (typically `/run/user/<uid>/netpair/`).
+Pair metadata lives under `$XDG_RUNTIME_DIR/netpair/` (typically `/run/user/<uid>/netpair/`):
+
+| File | Contents |
+|------|----------|
+| `<name>.json` | Pair state (pasta and manager PIDs — in-pair and host — and socket path) |
+| `<name>.sock` | Manager UNIX socket |
+| `<name>.log` | pasta log + `netpair-manager` messages + output of `--daemon` runs (useful for debugging) |
+| `<name>.resolv.conf` | Corrected resolver written at `create` time |
+
+`netpair create` truncates `<name>.log`. Attached `netpair run` writes to the caller's stdout/stderr; only `--daemon` processes inherit the log file, so their output does not interleave with the host terminal — use `netpair --verbose create` to watch startup live, or `tail -f <name>.log` for daemon output.
+
+A running pair keeps the `netpair-manager` process it was created with: package upgrades replace the binary but not the running manager. After upgrading netpair, recreate existing pairs (`netpair destroy <name> && netpair create <name>`); `netpair doctor` flags pairs whose manager is older than the installed netpair.
+
+## Isolation
+
+pasta is started with no port forwarding in either direction (`-t none -T none -u none -U none`), so pair services are **not** reachable from the host until you run `netpair connect`. Outbound traffic (internet access for processes inside the pair) still works, spliced through pasta.
+
+DNS inside a pair: pasta exposes the host's `/etc/resolv.conf` to the namespace. On systemd hosts that file points at the 127.0.0.53 stub of systemd-resolved, which has no listener inside the pair — so `netpair create` writes a corrected copy (real upstream nameservers, kept in `<name>.resolv.conf`) and the manager bind-mounts it over `/etc/resolv.conf` *inside the pair's mount namespace* only. The host file is never touched.
 
 ## Architecture
 
@@ -212,3 +264,30 @@ Host                         Pair namespace (pasta)
 
 - **`connect`** relays TCP via the manager Unix socket (no pasta port reload).
 - **`ssh-tunnel` / `ssh-remote`** use standard SSH `-R` / `-L` protocol in-process.
+
+## Ubuntu 24.04: unprivileged user namespaces & AppArmor
+
+Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`, which forbids unconfined processes from creating user namespaces. pasta needs one, so without a profile it fails with errors like:
+
+```
+Couldn't write to /proc/self/uid_map: Operation not permitted
+Couldn't configure user mappings
+clone: Operation not permitted
+```
+
+(`netpair create` detects this and prints the remedy.) The fix is the bundled AppArmor profile, which the `.deb` installs as `/etc/apparmor.d/usr.bin.pasta` and reloads on installation. When it is in place, re-check with:
+
+```bash
+sudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta   # if not reloaded yet
+netpair doctor
+```
+
+The profile must grant userns creation (`userns,`). Once a pasta profile is **loaded**, it decides for itself whether pasta may create a user namespace — the sysctls only apply to unconfined programs. So a stale profile (for example from netpair ≤ 0.1.1, which lacked the `userns` rule) fails with:
+
+```
+Couldn't create user namespace: Permission denied
+```
+
+even when both restriction sysctls are `0`. Reload the profile after upgrading netpair; `netpair doctor` warns when the installed profile lacks the rule.
+
+An alternative (less secure, system-wide) is `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` — but a loaded pasta profile still needs `userns,`.
