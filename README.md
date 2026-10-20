@@ -8,10 +8,10 @@ Each **pair** gets its own network stack via [pasta](https://passt.top/) (from t
 
 - Linux with unprivileged user namespaces enabled
 - [passt](https://passt.top/) — provides `pasta` (`apt install passt`)
-- Go 1.22+ (to build from source)
-- Optional: `ss` (iproute2) for automatic port discovery in `connect`
+- [iproute2](https://wiki.linuxfoundation.org/networking/iproute2) — provides `ss` for automatic port discovery in `connect`
+- Go 1.26+ (to build from source)
 
-## Build
+## Build from source
 
 ```bash
 make build
@@ -19,6 +19,100 @@ make build
 ```
 
 Both binaries must be on `PATH` together, or `netpair-manager` must sit next to `netpair`.
+
+## Packaging
+
+Packaging files live under [`package/`](package/).
+
+### Ubuntu / Debian
+
+#### Runtime dependencies
+
+To run netpair after installing the `.deb`:
+
+```bash
+sudo apt install passt iproute2
+```
+
+| Package | Purpose |
+|---------|---------|
+| `passt` | Provides `pasta` for isolated network namespaces |
+| `iproute2` | Provides `ss` for `netpair connect` auto-discovery |
+
+#### Build dependencies (Ubuntu 24.04 Noble)
+
+On **24.04**, all packages are in the default repos (main + universe). No extra PPAs are required.
+
+```bash
+sudo apt update
+sudo apt install \
+  debhelper \
+  devscripts \
+  golang-1.26-go \
+  passt \
+  iproute2
+```
+
+| Package | Repo | Notes |
+|---------|------|-------|
+| `debhelper` | main | Required by `debian/rules` |
+| `devscripts` | main | Provides `dpkg-buildpackage` |
+| `golang-1.26-go` | universe | **Use this, not `golang-go`** |
+| `passt` | universe | Runtime dep; useful for testing |
+| `iproute2` | main | Runtime dep |
+
+If `passt` is not found, enable universe:
+
+```bash
+sudo add-apt-repository universe
+sudo apt update
+```
+
+**Go version:** `go.mod` requires Go 1.26. The `golang-go` meta package on Noble still points to Go 1.22, which is too old. Install `golang-1.26-go` and put it on `PATH` before building:
+
+```bash
+export PATH=/usr/lib/go-1.26/bin:$PATH
+/usr/lib/go-1.26/bin/go version   # should show go1.26.x
+./package/ubuntu/build-deb.sh
+```
+
+Install the resulting package from the parent directory:
+
+```bash
+sudo apt install ../netpair_0.1.0-1_*.deb
+```
+
+See also [`package/ubuntu/README.md`](package/ubuntu/README.md).
+
+#### Ubuntu 22.04 (Jammy) and older
+
+| Package | Jammy 22.04 |
+|---------|-------------|
+| `debhelper`, `golang-go`, `iproute2` | Available |
+| **`passt`** | **Not in Ubuntu repos** |
+
+Workarounds for missing `passt` on Jammy:
+
+1. Upgrade to 24.04 (simplest).
+2. Build [passt from source](https://passt.top/).
+3. Try the Noble `.deb` (libc-dependent):
+   ```bash
+   wget http://archive.ubuntu.com/ubuntu/pool/universe/p/passt/passt_0.0~git20240220.1e6f92b-1_amd64.deb
+   sudo dpkg -i passt_*.deb
+   ```
+
+There is no official PPA for `passt` on Jammy.
+
+### Arch Linux (AUR)
+
+Runtime: `passt`. Build: `go`. Optional: `iproute2` for `connect` auto-discovery.
+
+```bash
+cd package/aur
+makepkg -si
+```
+
+The PKGBUILD clones tag `v0.1.0` into `src/netpair`. See [`package/aur/README.md`](package/aur/README.md).
 
 ## Quick start
 
