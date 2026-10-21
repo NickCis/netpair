@@ -48,6 +48,13 @@ sudo apt-get install -f
 - `/etc/apparmor.d/usr.bin.pasta` — pasta AppArmor profile (conffile)
 - `/usr/share/doc/netpair/README.md`
 
+## Releases
+
+Ubuntu and AUR packages must always be released together with the same
+version: update `debian/changelog` **and** `package/aur/PKGBUILD` +
+`.SRCINFO`, then run `make check-versions` from the repository root. See
+[`../../AGENTS.md`](../../AGENTS.md).
+
 ## Notes
 
 - Both binaries must be on `PATH`; the Debian package installs both to `/usr/bin`.

@@ -1,4 +1,4 @@
-.PHONY: build install test clean
+.PHONY: build install test clean check-versions
 
 build:
 	go build -o netpair ./cmd/netpair
@@ -12,3 +12,6 @@ clean:
 
 test:
 	go test ./...
+
+check-versions:
+	./scripts/check-package-versions.sh

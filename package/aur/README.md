@@ -16,12 +16,34 @@ From this directory:
 makepkg -si
 ```
 
-Or publish to AUR:
+`makepkg` clones the git tag `v${pkgver}` from the remote, so the tag must be
+pushed first (see [Releasing](#releasing)).
 
-1. Copy `PKGBUILD` and `.SRCINFO` to your AUR package directory.
-2. Update `pkgver` / source tag when releasing.
-3. Run `makepkg --printsrcinfo > .SRCINFO` after PKGBUILD changes.
-4. Submit with `makepkg -src` and push to AUR.
+## Releasing
+
+The version must match the Ubuntu package; see [`../../AGENTS.md`](../../AGENTS.md)
+for the full checklist.
+
+1. Update the Ubuntu version in `package/ubuntu/debian/changelog` (source of
+   truth), then set `pkgver`/`pkgrel` in `PKGBUILD`.
+2. Regenerate the AUR metadata:
+
+   ```bash
+   makepkg --printsrcinfo > .SRCINFO
+   ```
+
+   Without `makepkg`, edit `.SRCINFO` by hand so `pkgver`, `pkgrel`, and the
+   `#tag=vX.Y.Z` source match `PKGBUILD`.
+3. From the repository root, `make check-versions` must pass.
+4. Commit, then tag and push the release the package points at:
+
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+5. Build and check the package with `makepkg -f` (or `makepkg -si`).
+6. Copy `PKGBUILD` and `.SRCINFO` to the AUR package repository and push.
 
 ## Notes
 

@@ -80,7 +80,7 @@ sudo apt update
 Install the resulting package from the parent directory:
 
 ```bash
-sudo apt install ../netpair_0.1.0-1_*.deb
+sudo apt install ../netpair_0.1.5-1_*.deb
 ```
 
 See also [`package/ubuntu/README.md`](package/ubuntu/README.md).
@@ -113,7 +113,7 @@ cd package/aur
 makepkg -si
 ```
 
-The PKGBUILD clones tag `v0.1.0` into `src/netpair`. See [`package/aur/README.md`](package/aur/README.md).
+The PKGBUILD clones tag `v0.1.5` into `src/netpair`; the tag must exist on the remote. See [`package/aur/README.md`](package/aur/README.md).
 
 ## Quick start
 
