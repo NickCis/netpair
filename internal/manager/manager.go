@@ -23,6 +23,8 @@ import (
 type Manager struct {
 	name       string
 	socketPath string
+	hostUID    int
+	hostGID    int
 	procs      map[string]*managedProc
 	nextID     int
 	mu         sync.Mutex
@@ -61,7 +63,13 @@ func FixResolver(resolvPath string) error {
 	return nil
 }
 
-func Run(name, socketPath string) error {
+func Run(name, socketPath string, hostUID, hostGID int) error {
+	if hostUID < 0 {
+		hostUID = os.Getuid()
+	}
+	if hostGID < 0 {
+		hostGID = os.Getgid()
+	}
 	_ = os.Remove(socketPath)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -74,8 +82,21 @@ func Run(name, socketPath string) error {
 	m := &Manager{
 		name:       name,
 		socketPath: socketPath,
+		hostUID:    hostUID,
+		hostGID:    hostGID,
 		procs:      make(map[string]*managedProc),
 		listener:   ln,
+	}
+
+	// Managed processes no longer hold capabilities over the pair's network
+	// namespace (they run as the unprivileged caller, see newCmd), so lift
+	// the unprivileged port limit inside the pair. This is a per-namespace
+	// sysctl and therefore never affects the host; the guard also keeps
+	// unit tests running the manager outside a pair from touching it.
+	if os.Getuid() == 0 && m.hostUID != 0 {
+		if err := os.WriteFile("/proc/sys/net/ipv4/ip_unprivileged_port_start", []byte("0"), 0o644); err != nil {
+			log.Printf("cannot lower ip_unprivileged_port_start in pair: %v", err)
+		}
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -131,7 +152,7 @@ func (m *Manager) handleConn(conn net.Conn) {
 	case "ping":
 		_ = protocol.WriteResponse(conn, protocol.Response{OK: true})
 	case "status":
-		_ = protocol.WriteResponse(conn, protocol.Response{OK: true, Version: protocol.Version, PID: os.Getpid()})
+		_ = protocol.WriteResponse(conn, protocol.Response{OK: true, Version: protocol.Version, PID: os.Getpid(), RunAsUID: m.hostUID})
 	case "shutdown":
 		_ = protocol.WriteResponse(conn, protocol.Response{OK: true})
 		go m.close()
@@ -154,6 +175,41 @@ func (m *Manager) handleConn(conn net.Conn) {
 	}
 }
 
+// newCmd builds a command that runs with the caller's real UID/GID. pasta
+// maps the invoking user to UID 0 inside the pair's user namespace, which
+// makes tools that refuse to run as root fail (Chromium) and makes home
+// directory lookups resolve to /root (SSH known_hosts, identity files).
+// Inside a pair the manager is that namespace's root, so it can start each
+// process in a nested user namespace mapping its UID to the caller's UID.
+// The manager itself stays namespace root for setup work (socket, resolver,
+// relay); only managed processes see the caller's identity.
+func (m *Manager) newCmd(argv []string) *exec.Cmd {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = os.Environ()
+
+	uid, gid := os.Getuid(), os.Getgid()
+	if m.hostUID == uid && m.hostGID == gid {
+		// Nothing to remap: outside a pair (tests, or a pair created by
+		// root) the process already runs with the target identity.
+		return cmd
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: syscall.CLONE_NEWUSER,
+		UidMappings: []syscall.SysProcIDMap{{
+			ContainerID: m.hostUID,
+			HostID:      uid,
+			Size:        1,
+		}},
+		GidMappings: []syscall.SysProcIDMap{{
+			ContainerID: m.hostGID,
+			HostID:      gid,
+			Size:        1,
+		}},
+		GidMappingsEnableSetgroups: false,
+	}
+	return cmd
+}
+
 func (m *Manager) handleRun(conn net.Conn, req protocol.Request) {
 	if len(req.Argv) == 0 {
 		_ = protocol.WriteResponse(conn, protocol.Response{OK: false, Error: "argv required"})
@@ -162,11 +218,10 @@ func (m *Manager) handleRun(conn net.Conn, req protocol.Request) {
 
 	id := m.newProcessID(req.ID)
 
-	cmd := exec.Command(req.Argv[0], req.Argv[1:]...)
+	cmd := m.newCmd(req.Argv)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
 
 	if err := cmd.Start(); err != nil {
 		_ = protocol.WriteResponse(conn, protocol.Response{OK: false, Error: err.Error()})
@@ -327,11 +382,10 @@ func (m *Manager) handleExec(conn net.Conn, br *bufio.Reader, req protocol.Reque
 		return
 	}
 
-	cmd := exec.Command(req.Argv[0], req.Argv[1:]...)
+	cmd := m.newCmd(req.Argv)
 	cmd.Stdin = stdinR
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stdoutW
-	cmd.Env = os.Environ()
 
 	if err := cmd.Start(); err != nil {
 		_ = stdinR.Close()

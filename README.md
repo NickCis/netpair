@@ -80,7 +80,7 @@ sudo apt update
 Install the resulting package from the parent directory:
 
 ```bash
-sudo apt install ../netpair_0.1.5-1_*.deb
+sudo apt install ../netpair_0.1.6-1_*.deb
 ```
 
 See also [`package/ubuntu/README.md`](package/ubuntu/README.md).
@@ -113,7 +113,7 @@ cd package/aur
 makepkg -si
 ```
 
-The PKGBUILD clones tag `v0.1.5` into `src/netpair`; the tag must exist on the remote. See [`package/aur/README.md`](package/aur/README.md).
+The PKGBUILD clones tag `v0.1.6` into `src/netpair`; the tag must exist on the remote. See [`package/aur/README.md`](package/aur/README.md).
 
 ## Quick start
 
@@ -163,6 +163,20 @@ proc-2  10      -         exited(42)  /bin/sh -c ...
 A pair has its own PID namespace, so `NS-PID` only exists inside the pair; `HOST-PID` is the real process on the host (use it with regular host tools such as `kill`, `strace` or `cat /proc/<pid>/...`). It shows `-` for processes that already exited or that cannot be resolved.
 
 `netpair kill <name> --id proc-N` signals a managed process through the manager (default `SIGKILL`); add `--signal TERM` (a name or a number) for a graceful stop. Because `netpair ps` reports host PIDs, you can also signal a running process directly from the host with `kill <HOST-PID>`.
+
+### User and group IDs
+
+pasta creates the pair's user namespace with the invoking user mapped to UID 0, so a process started directly inside it would see itself as root. netpair-manager starts every managed process in a **nested user namespace mapped to your real UID/GID** instead. Inside a pair:
+
+- `id` reports your normal user and group IDs;
+- `getpwuid($(id -u))` resolves to your account, so `~` is your home directory;
+- files you own on the host are owned by you, and applications that refuse to run as root (Chromium, for example) work.
+
+The manager itself remains root inside the pair's user namespace, because it creates the socket, bind-mounts the corrected resolv.conf and relays connections; only managed processes take your identity.
+
+Trade-offs: managed processes run without capabilities over the pair's namespaces. Configuring interfaces, mounting filesystems and raw sockets are unavailable (`ping` may fail depending on the host's `net.ipv4.ping_group_range`); they can still create their own nested namespaces, which sandboxed applications use. Binding low ports still works: the manager raises `net.ipv4.ip_unprivileged_port_start` to 0 in the pair's own network namespace.
+
+Host-root-owned files still appear as `nobody` inside the pair, since only your UID is mapped. Programs that enforce configuration ownership can trip over this: OpenSSH rejects included system config files with `Bad owner or permissions on /etc/ssh/ssh_config.d/...`. Use `ssh -F ~/.ssh/config` (or `-F /dev/null`) inside pairs to skip the system config.
 
 ## Commands
 

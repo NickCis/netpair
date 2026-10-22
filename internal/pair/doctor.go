@@ -90,6 +90,33 @@ func Doctor() []Check {
 		checks = append(checks, ok("pasta apparmor profile", profile))
 	}
 
+	if restricted {
+		// The manager needs its own profile transition to escape the pasta
+		// confinement *and* keep the userns permission: an unconfined
+		// manager would be forced into the restrictive unprivileged_userns
+		// profile when it creates the per-process user namespace.
+		if transitions, err := profileTransitionsManager(profile); err == nil && !transitions {
+			checks = append(checks, warn("pasta apparmor profile",
+				fmt.Sprintf("%s runs /usr/bin/netpair-manager without a profile transition (Ux);\n"+
+					"on this system the manager cannot map managed processes to your uid. Reload the current profile:\n"+
+					"  sudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta", profile)))
+		}
+		mgrProfile := "/etc/apparmor.d/usr.bin.netpair-manager"
+		if _, err := os.Stat(mgrProfile); err != nil {
+			checks = append(checks, warn("netpair-manager apparmor profile", fmt.Sprintf(
+				"%s not found; managed processes cannot switch to your uid on this system\n"+
+					"(install an up-to-date netpair package)", mgrProfile)))
+		} else if grants, err := profileGrantsUserns(mgrProfile); err != nil {
+			checks = append(checks, warn("netpair-manager apparmor profile", fmt.Sprintf("%s unreadable: %v", mgrProfile, err)))
+		} else if !grants {
+			checks = append(checks, warn("netpair-manager apparmor profile", fmt.Sprintf(
+				"%s does not grant userns creation ('userns' rule); managed processes cannot switch to your uid\n"+
+					"Reload an up-to-date profile with:\n  sudo apparmor_parser -r %s", mgrProfile, mgrProfile)))
+		} else {
+			checks = append(checks, ok("netpair-manager apparmor profile", mgrProfile))
+		}
+	}
+
 	// -- ss for connect auto-discovery
 	if ss, err := exec.LookPath("ss"); err != nil {
 		checks = append(checks, warn("ss (iproute2)",
@@ -149,7 +176,8 @@ func apparmorUsernsRestriction() (restricted bool, checks []Check) {
 
 // pairChecks reports the state of existing pairs. A manager process keeps
 // running the binary it was started with, so after a package upgrade pairs
-// created earlier may still speak an older protocol and need recreation.
+// created earlier may still speak an older protocol or run commands as root,
+// and need recreation.
 func pairChecks() []Check {
 	names, err := List()
 	if err != nil || len(names) == 0 {
@@ -167,20 +195,57 @@ func pairChecks() []Check {
 				"not running (stale state; clean up with 'netpair destroy "+n+"')"))
 			continue
 		}
-		v, err := protocol.ManagerVersion(st.SocketPath)
+		resp, err := protocol.Call(st.SocketPath, protocol.Request{Op: "status"})
 		if err != nil {
 			checks = append(checks, warn("pair "+n, "manager not reachable: "+err.Error()))
 			continue
 		}
-		if v != protocol.Version {
-			checks = append(checks, warn("pair "+n, fmt.Sprintf(
-				"manager speaks protocol %d, this netpair speaks %d; recreate the pair to use the new binary:\n"+
-					"  netpair destroy %s && netpair create %s", v, protocol.Version, n, n)))
+		if !resp.OK {
+			checks = append(checks, warn("pair "+n, "manager error: "+resp.Error))
 			continue
 		}
-		checks = append(checks, ok("pair "+n, fmt.Sprintf("running, manager protocol %d", v)))
+		if resp.Version != protocol.Version {
+			checks = append(checks, warn("pair "+n, fmt.Sprintf(
+				"manager speaks protocol %d, this netpair speaks %d; recreate the pair to use the new binary:\n"+
+					"  netpair destroy %s && netpair create %s", resp.Version, protocol.Version, n, n)))
+			continue
+		}
+		if resp.RunAsUID != os.Getuid() {
+			checks = append(checks, warn("pair "+n, fmt.Sprintf(
+				"manager runs commands as uid %d, want %d (pair created by an older netpair); recreate it:\n"+
+					"  netpair destroy %s && netpair create %s", resp.RunAsUID, os.Getuid(), n, n)))
+			continue
+		}
+		checks = append(checks, ok("pair "+n, fmt.Sprintf(
+			"running, manager protocol %d, commands run as uid %d", resp.Version, resp.RunAsUID)))
 	}
 	return checks
+}
+
+// profileTransitionsManager reports whether the pasta profile execs
+// /usr/bin/netpair-manager with a profile transition (px/cx) instead of
+// unconfined (Ux). Without the transition the manager is unconfined and,
+// on systems restricting unprivileged user namespaces, cannot create the
+// per-process user namespace used to map commands to the caller's uid.
+func profileTransitionsManager(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		if !strings.Contains(line, "/usr/bin/netpair-manager") {
+			continue
+		}
+		for _, f := range strings.Fields(line) {
+			if strings.HasPrefix(f, "px") || strings.HasPrefix(f, "cx") {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // profileGrantsUserns reports whether an AppArmor profile text contains a

@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# usr.bin.netpair-manager - AppArmor profile for netpair-manager(1).
+#
+# On Ubuntu 24.04+ unprivileged user namespaces are restricted for
+# unconfined programs (kernel.apparmor_restrict_unprivileged_userns=1).
+# pasta runs under its own profile with the 'userns' rule, but the manager
+# is exec'd by pasta and would normally be unconfined. The manager starts
+# every managed process in a nested user namespace mapped to the invoking
+# user's real UID/GID (pasta maps that user to UID 0 inside the pair), so it
+# needs the userns permission itself. This profile is otherwise unconfined,
+# like the pasta exec rule it replaces.
+#
+# The pasta profile transitions here with 'px' for /usr/bin/netpair-manager.
+
+abi <abi/4.0>,
+
+include <tunables/global>
+
+profile netpair-manager /usr/bin/netpair-manager flags=(unconfined) {
+  userns,
+}

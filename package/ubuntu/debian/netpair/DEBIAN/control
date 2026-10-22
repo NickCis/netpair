@@ -1,8 +1,8 @@
 Package: netpair
-Version: 0.1.5-1
+Version: 0.1.6-1
 Architecture: amd64
 Maintainer: Nicolas Cisco <nicolas@nckweb.com.ar>
-Installed-Size: 7868
+Installed-Size: 7883
 Depends: passt, iproute2
 Section: net
 Priority: optional

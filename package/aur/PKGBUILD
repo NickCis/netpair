@@ -2,7 +2,7 @@
 # The source is the git tag v${pkgver}; tag and push it before publishing
 # (see AGENTS.md and package/aur/README.md).
 pkgname=netpair
-pkgver=0.1.5
+pkgver=0.1.6
 pkgrel=1
 pkgdesc="Run process pairs in isolated network namespaces with port relay and SSH forwarding"
 arch=('x86_64' 'aarch64')

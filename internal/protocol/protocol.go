@@ -37,6 +37,7 @@ type Response struct {
 	OK        bool          `json:"ok"`
 	Error     string        `json:"error,omitempty"`
 	Version   int           `json:"version,omitempty"`
+	RunAsUID  int           `json:"run_as_uid,omitempty"`
 	ID        string        `json:"id,omitempty"`
 	PID       int           `json:"pid,omitempty"`
 	Output    string        `json:"output,omitempty"`

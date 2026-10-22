@@ -36,7 +36,7 @@ func TestDiscoverPorts(t *testing.T) {
 
 	sock := filepath.Join(t.TempDir(), "manager.sock")
 	done := make(chan error, 1)
-	go func() { done <- manager.Run("test", sock) }()
+	go func() { done <- manager.Run("test", sock, os.Getuid(), os.Getgid()) }()
 	defer func() {
 		_, _ = protocol.Call(sock, protocol.Request{Op: "shutdown"})
 		select {

@@ -31,13 +31,13 @@ The binary packages appear in the parent directory (`../netpair_*.deb`).
 ## Install
 
 ```bash
-sudo apt install ../netpair_0.1.5-1_*.deb
+sudo apt install ../netpair_0.1.6-1_*.deb
 ```
 
 Or after building:
 
 ```bash
-sudo dpkg -i ../netpair_0.1.5-1_*.deb
+sudo dpkg -i ../netpair_0.1.6-1_*.deb
 sudo apt-get install -f
 ```
 
@@ -46,6 +46,7 @@ sudo apt-get install -f
 - `/usr/bin/netpair`
 - `/usr/bin/netpair-manager`
 - `/etc/apparmor.d/usr.bin.pasta` — pasta AppArmor profile (conffile)
+- `/etc/apparmor.d/usr.bin.netpair-manager` — manager profile granting userns for per-process UID mapping (conffile)
 - `/usr/share/doc/netpair/README.md`
 
 ## Releases
@@ -66,3 +67,8 @@ version: update `debian/changelog` **and** `package/aur/PKGBUILD` +
   whether pasta may create user namespaces, regardless of the sysctl. Upgrade
   from netpair 0.1.1 (whose profile lacked that rule) reloads the fixed profile.
   Verify the environment after installation with `netpair doctor`.
+- The manager starts every managed process in a nested user namespace mapped to
+  the invoking user's UID/GID (see the main README). On systems with the
+  AppArmor restriction it needs its own profile, `usr.bin.netpair-manager`,
+  which is otherwise unconfined but grants `userns`; the pasta profile
+  transitions to it. Both profiles are reloaded by the package postinst.

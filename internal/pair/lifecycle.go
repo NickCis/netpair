@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -157,7 +158,13 @@ func Create(name, hostname string, verbose bool) (*State, error) {
 	if hostname != "" {
 		args = append(args, "-H", hostname)
 	}
-	managerArgs := []string{mgrBin, "--socket", sockPath, "--name", name}
+	managerArgs := []string{
+		mgrBin, "--socket", sockPath, "--name", name,
+		// Processes managed by this pair run with the invoking user's real
+		// UID/GID (pasta maps that user to root inside the pair namespace).
+		"--host-uid", strconv.Itoa(os.Getuid()),
+		"--host-gid", strconv.Itoa(os.Getgid()),
+	}
 	if path := writePairResolvConf(resolvPath); path != "" {
 		// pasta --config-net leaves the namespace with a copy of the
 		// host's resolv.conf. On systemd hosts that points at the

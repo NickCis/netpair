@@ -60,11 +60,14 @@ profile pasta /usr/bin/pasta{,.avx2} flags=(attach_disconnected) {
   owner @{run}/user/@{uid}/netpair/	r,
   owner @{run}/user/@{uid}/netpair/**	rw,
 
-  # netpair-manager is execed by pasta as the namespace command; let it
-  # escape the pasta confinement. /usr/bin covers package installs, the
-  # other prefixes cover common build locations (--prefix, make install,
-  # temporary builds).
-  /usr/bin/netpair-manager		Ux,
+  # netpair-manager is execed by pasta as the namespace command. Installed
+  # builds transition to the netpair-manager profile (px): the manager must
+  # create a nested user namespace for every managed process, which an
+  # unconfined program may not do when unprivileged user namespaces are
+  # restricted (Ubuntu 24.04+). The other prefixes cover common build
+  # locations; on a restricted system those builds need their own profile
+  # (or the restriction disabled).
+  /usr/bin/netpair-manager		px,
   /tmp/**/netpair-manager		Ux,
   /opt/**/netpair-manager		Ux,
   /usr/local/**/netpair-manager		Ux,

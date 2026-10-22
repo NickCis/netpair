@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -14,12 +15,19 @@ import (
 )
 
 // startTestManager runs a Manager on a temp socket outside any pair
-// namespace and returns the socket path plus a shutdown function.
+// namespace, with managed processes running as the current user.
 func startTestManager(t *testing.T) (string, func()) {
+	t.Helper()
+	return startTestManagerAs(t, os.Getuid(), os.Getgid())
+}
+
+// startTestManagerAs runs a Manager on a temp socket outside any pair
+// namespace and configures the UID/GID managed processes run as.
+func startTestManagerAs(t *testing.T, hostUID, hostGID int) (string, func()) {
 	t.Helper()
 	sock := filepath.Join(t.TempDir(), "manager.sock")
 	done := make(chan error, 1)
-	go func() { done <- Run("test", sock) }()
+	go func() { done <- Run("test", sock, hostUID, hostGID) }()
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -114,6 +122,68 @@ func TestExecForwardsStdin(t *testing.T) {
 	}
 	if got, want := string(out), "hello stdin\n"; got != want {
 		t.Fatalf("stream output = %q, want %q", got, want)
+	}
+
+	wr, err := protocol.Call(sock, protocol.Request{Op: "wait", ID: resp.ID})
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !wr.OK || wr.ExitCode != 0 {
+		t.Fatalf("wait = %+v, want exit code 0", wr)
+	}
+}
+
+// TestCommandsRunAsConfiguredUID checks that managed processes run in a
+// nested user namespace mapped to the configured (host) UID/GID instead of
+// inheriting the manager's identity. Inside a pair the manager is namespace
+// root; without this mapping tools such as Chromium refuse to run and SSH
+// resolves the home directory to /root.
+func TestCommandsRunAsConfiguredUID(t *testing.T) {
+	uid, gid := os.Getuid(), os.Getgid()
+	if uid == 0 {
+		t.Skip("needs a non-root user to map to a different uid")
+	}
+	targetUID := uid + 1000
+	if targetUID > 60000 {
+		t.Skipf("uid %d is too large for this test", targetUID)
+	}
+	targetGID := gid + 1000
+	if targetGID > 60000 {
+		t.Skipf("gid %d is too large for this test", targetGID)
+	}
+
+	sock, stop := startTestManagerAs(t, targetUID, targetGID)
+	defer stop()
+
+	sr, err := protocol.Call(sock, protocol.Request{Op: "status"})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if sr.RunAsUID != targetUID {
+		t.Fatalf("status reports run_as_uid %d, want %d", sr.RunAsUID, targetUID)
+	}
+
+	conn, br, resp, err := protocol.Dial(sock, protocol.Request{
+		Op:   "exec",
+		Argv: []string{"/bin/sh", "-c", "id -u; id -g"},
+	})
+	if err != nil {
+		t.Fatalf("exec dial: %v", err)
+	}
+	defer conn.Close()
+	if !resp.OK {
+		if strings.Contains(resp.Error, "operation not permitted") {
+			t.Skipf("cannot create a nested user namespace here: %s", resp.Error)
+		}
+		t.Fatalf("exec failed: %s", resp.Error)
+	}
+
+	out, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if want := fmt.Sprintf("%d\n%d\n", targetUID, targetGID); string(out) != want {
+		t.Fatalf("id output = %q, want %q", out, want)
 	}
 
 	wr, err := protocol.Call(sock, protocol.Request{Op: "wait", ID: resp.ID})

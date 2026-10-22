@@ -1,3 +1,25 @@
+netpair (0.1.6-1) unstable; urgency=medium
+
+  * Managed processes now run with the invoking user's real UID/GID. pasta
+    maps that user to UID 0 inside the pair's user namespace, which made
+    every process think it was root: Chromium refused to start, and SSH
+    resolved ~/.ssh/known_hosts and identity files under /root. The manager
+    now starts each process in a nested user namespace mapped to the caller's
+    UID/GID; the manager itself stays namespace root for setup work.
+  * The Ubuntu package ships an AppArmor profile for netpair-manager and the
+    pasta profile transitions to it. Without that, systems with
+    kernel.apparmor_restrict_unprivileged_userns=1 would force the nested
+    user namespace into the restrictive unprivileged_userns profile.
+  * Keep low-port binding available to managed processes by raising
+    net.ipv4.ip_unprivileged_port_start in the pair's own network namespace.
+  * netpair doctor reports the UID a pair's manager uses for commands and
+    warns when a running pair predates this mapping; it also checks the
+    netpair-manager AppArmor profile and the pasta profile transition.
+  * Recreate existing pairs after upgrading: a running pair keeps the
+    manager (and identity mapping) it was created with.
+
+ -- Nicolas Cisco <nicolas@nckweb.com.ar>  Wed, 21 Oct 2026 23:20:00 +0000
+
 netpair (0.1.5-1) unstable; urgency=medium
 
   * netpair ps: add a header row and a HOST-PID column. Processes run in the

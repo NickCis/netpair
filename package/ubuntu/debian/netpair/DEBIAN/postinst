@@ -3,12 +3,15 @@
 
 set -e
 
-# Best-effort reload of the shipped pasta AppArmor profile so that pairs
-# start working right after installation on Ubuntu 24.04+ where unprivileged
-# user namespaces are restricted
-# (kernel.apparmor_restrict_unprivileged_userns=1). Loading profiles at boot
-# is handled by apparmor.service; this only speeds things up.
+# Best-effort reload of the shipped AppArmor profiles so that pairs start
+# working right after installation on Ubuntu 24.04+ where unprivileged user
+# namespaces are restricted (kernel.apparmor_restrict_unprivileged_userns=1).
+# The manager profile is loaded first: pasta's profile transitions to it, and
+# the manager needs its own userns permission to map managed processes to the
+# invoking user's UID. Loading profiles at boot is handled by
+# apparmor.service; this only speeds things up.
 if [ "$1" = configure ] && [ -x /usr/sbin/apparmor_parser ] && [ -w /etc/apparmor.d ]; then
+	/usr/sbin/apparmor_parser -r /etc/apparmor.d/usr.bin.netpair-manager 2>/dev/null || true
 	/usr/sbin/apparmor_parser -r /etc/apparmor.d/usr.bin.pasta 2>/dev/null || true
 fi
 

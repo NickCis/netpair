@@ -19,6 +19,7 @@ override_dh_auto_install:
 	install -D -m 755 netpair-manager debian/netpair/usr/bin/netpair-manager
 	install -D -m 644 README.md debian/netpair/usr/share/doc/netpair/README.md
 	install -D -m 644 package/ubuntu/apparmor/usr.bin.pasta debian/netpair/etc/apparmor.d/usr.bin.pasta
+	install -D -m 644 package/ubuntu/apparmor/usr.bin.netpair-manager debian/netpair/etc/apparmor.d/usr.bin.netpair-manager
 
 override_dh_dwz:
 	:
