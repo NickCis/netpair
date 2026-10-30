@@ -149,8 +149,18 @@ func relay(socketPath string, nsPort int, client net.Conn) {
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(conn, client)
+		// Propagate a client half-close to the manager. The manager's relay
+		// turns that FIN into CloseWrite on the target; without it, services
+		// that half-close a request (Firestore WebChannel) never see EOF.
+		closeWrite(conn)
 	}()
 	wg.Wait()
+}
+
+func closeWrite(conn net.Conn) {
+	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+		_ = cw.CloseWrite()
+	}
 }
 
 func discoverPorts(socketPath string) ([]PortMap, error) {

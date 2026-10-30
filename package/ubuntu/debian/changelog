@@ -1,3 +1,15 @@
+netpair (0.1.7-1) unstable; urgency=medium
+
+  * Propagate a client half-close through `netpair connect` to the manager
+    relay. The manager already turns that FIN into CloseWrite on the target,
+    but connect never sent it, so services that half-close a request (Firestore
+    WebChannel, for example) never saw EOF and hung.
+  * Reap orphaned children in the pair's PID 1 manager. Chromium renderer and
+    zygote processes were reparented to the manager when the browser exited and
+    accumulated as zombies; the manager now reaps zombies it did not start.
+
+ -- Nicolas Cisco <nicolas@nckweb.com.ar>  Fri, 30 Oct 2026 18:40:00 +0000
+
 netpair (0.1.6-1) unstable; urgency=medium
 
   * Managed processes now run with the invoking user's real UID/GID. pasta

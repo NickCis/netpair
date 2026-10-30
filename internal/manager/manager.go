@@ -10,7 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +33,8 @@ type Manager struct {
 	mu         sync.Mutex
 	listener   net.Listener
 	shutdown   bool
+	closeOnce  sync.Once
+	reaperStop chan struct{}
 }
 
 type managedProc struct {
@@ -86,7 +91,13 @@ func Run(name, socketPath string, hostUID, hostGID int) error {
 		hostGID:    hostGID,
 		procs:      make(map[string]*managedProc),
 		listener:   ln,
+		reaperStop: make(chan struct{}),
 	}
+
+	// The manager is PID 1 inside the pair's PID namespace. Children whose
+	// parent exits (Chromium renderer/zygote processes, for example) are
+	// reparented here and must be reaped, or they accumulate as zombies.
+	go m.reapOrphans()
 
 	// Managed processes no longer hold capabilities over the pair's network
 	// namespace (they run as the unprivileged caller, see newCmd), so lift
@@ -122,15 +133,95 @@ func Run(name, socketPath string, hostUID, hostGID int) error {
 }
 
 func (m *Manager) close() {
-	m.shutdown = true
-	m.mu.Lock()
-	for _, p := range m.procs {
-		if p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
+	m.closeOnce.Do(func() {
+		m.shutdown = true
+		close(m.reaperStop)
+		m.mu.Lock()
+		for _, p := range m.procs {
+			if p.cmd.Process != nil {
+				_ = p.cmd.Process.Kill()
+			}
+		}
+		m.mu.Unlock()
+		_ = m.listener.Close()
+	})
+}
+
+// reapOrphans periodically reaps children that were reparented to the manager.
+// Managed processes are left to cmd.Wait().
+func (m *Manager) reapOrphans() {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.reaperStop:
+			return
+		case <-ticker.C:
+			m.reapOrphansOnce()
 		}
 	}
-	m.mu.Unlock()
-	_ = m.listener.Close()
+}
+
+// reapOrphansOnce reaps zombie children whose PPID is the manager and that
+// are not tracked managed processes. Walking /proc avoids wait4(-1), which
+// could steal a managed child from cmd.Wait().
+func (m *Manager) reapOrphansOnce() {
+	self := os.Getpid()
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid == self {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "status"))
+		if err != nil {
+			continue
+		}
+		state, ppid := parseProcStatus(string(data))
+		if state != "Z" || ppid != self || m.isManagedPID(pid) {
+			continue
+		}
+		var status unix.WaitStatus
+		_, _ = unix.Wait4(pid, &status, unix.WNOHANG, nil)
+	}
+}
+
+func parseProcStatus(status string) (state string, ppid int) {
+	for _, line := range strings.Split(status, "\n") {
+		switch {
+		case strings.HasPrefix(line, "State:"):
+			if fields := strings.Fields(line); len(fields) >= 2 {
+				state = fields[1]
+			}
+		case strings.HasPrefix(line, "PPid:"):
+			if fields := strings.Fields(line); len(fields) >= 2 {
+				ppid, _ = strconv.Atoi(fields[1])
+			}
+		}
+	}
+	return state, ppid
+}
+
+// isManagedPID reports whether pid is a live managed process. A process whose
+// done channel is closed has already been reaped by cmd.Wait(); its PID may
+// have been reused by an orphan.
+func (m *Manager) isManagedPID(pid int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, p := range m.procs {
+		if p.cmd.Process == nil || p.cmd.Process.Pid != pid {
+			continue
+		}
+		select {
+		case <-p.done:
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) handleConn(conn net.Conn) {

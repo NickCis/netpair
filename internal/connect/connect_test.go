@@ -1,6 +1,8 @@
 package connect
 
 import (
+	"bufio"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -83,5 +85,102 @@ func TestParsePortSpec(t *testing.T) {
 	}
 	if m.NSPort != 8080 || m.HostPort != 19080 {
 		t.Fatalf("unexpected map: %+v", m)
+	}
+}
+
+// TestRelayPropagatesClientHalfClose guards the Firestore WebChannel case:
+// the client half-closes its request, and the manager/target must see EOF so
+// it can answer. Without CloseWrite on the manager socket the target never
+// receives the FIN and the relay deadlocks.
+func TestRelayPropagatesClientHalfClose(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "manager.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	managerDone := make(chan struct{})
+	go func() {
+		defer close(managerDone)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+		br := bufio.NewReader(conn)
+		req, err := protocol.ReadRequest(br)
+		if err != nil || req.Op != "relay" {
+			return
+		}
+		if err := protocol.WriteResponse(conn, protocol.Response{OK: true}); err != nil {
+			return
+		}
+
+		buf := make([]byte, 1024)
+		for {
+			n, err := br.Read(buf)
+			if n > 0 {
+				_, _ = conn.Write(buf[:n])
+			}
+			if err == io.EOF {
+				_, _ = conn.Write([]byte("EOF"))
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tcpLn.Close()
+
+	relayDone := make(chan struct{})
+	go func() {
+		defer close(relayDone)
+		client, err := tcpLn.Accept()
+		if err != nil {
+			return
+		}
+		relay(sock, 1234, client)
+	}()
+
+	client, err := net.Dial("tcp", tcpLn.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	if _, err := client.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := io.ReadAll(client)
+	if err != nil {
+		t.Fatalf("read relay output: %v", err)
+	}
+	if string(out) != "helloEOF" {
+		t.Fatalf("relay output = %q, want %q (half-close was not propagated)", out, "helloEOF")
+	}
+
+	select {
+	case <-managerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fake manager did not finish")
+	}
+	select {
+	case <-relayDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay did not finish")
 	}
 }

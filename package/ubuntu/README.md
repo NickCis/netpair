@@ -31,13 +31,13 @@ The binary packages appear in the parent directory (`../netpair_*.deb`).
 ## Install
 
 ```bash
-sudo apt install ../netpair_0.1.6-1_*.deb
+sudo apt install ../netpair_0.1.7-1_*.deb
 ```
 
 Or after building:
 
 ```bash
-sudo dpkg -i ../netpair_0.1.6-1_*.deb
+sudo dpkg -i ../netpair_0.1.7-1_*.deb
 sudo apt-get install -f
 ```
 

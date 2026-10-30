@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -289,5 +290,31 @@ func TestWaitBlocksUntilExit(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed < 200*time.Millisecond {
 		t.Fatalf("wait returned after %v, before the process exited", elapsed)
+	}
+}
+
+// TestReaperReapsUnmanagedChild verifies the manager reaps children it did not
+// start itself (the orphan case: Chromium renderer/zygote processes reparented
+// to the pair's PID 1).
+func TestReaperReapsUnmanagedChild(t *testing.T) {
+	_, stop := startTestManager(t)
+	defer stop()
+
+	cmd := exec.Command("/bin/true")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+
+	deadline := time.Now().Add(2 * time.Second)
+	statusPath := fmt.Sprintf("/proc/%d/status", pid)
+	for {
+		if _, err := os.Stat(statusPath); os.IsNotExist(err) {
+			return // reaped by the manager's orphan reaper
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("child %d was not reaped", pid)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
